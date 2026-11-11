@@ -1,0 +1,48 @@
+{
+  "name": "agent-plan-review",
+  "version": "0.1.0",
+  "description": "A React component for reviewing an AI agent's plan step by step — confirm each step, adjust its fields, or ask the agent to change it.",
+  "keywords": ["react", "ai", "agent", "llm", "plan", "human-in-the-loop", "stepper", "framer-motion", "chat"],
+  "license": "MIT",
+  "author": "Esther Park",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/estherchaep/agent-plan-review.git"
+  },
+  "homepage": "https://github.com/estherchaep/agent-plan-review#readme",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./styles.css": "./dist/styles.css"
+  },
+  "files": ["dist"],
+  "sideEffects": ["*.css"],
+  "scripts": {
+    "dev": "vite",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp src/styles.css dist/styles.css",
+    "build:demo": "vite build",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "framer-motion": ">=11",
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.0",
+    "framer-motion": "^12.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^8.0.5"
+  }
+}
