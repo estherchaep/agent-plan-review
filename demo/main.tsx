@@ -1,45 +1,19 @@
 import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AnimatePresence, motion } from "framer-motion";
-import { PlanProgress, PlanReview, stepSummary, usePlanReview, type PlanStep, type PlanValues } from "agent-plan-review";
+import { InlineMarkdown, PlanProgress, PlanReview, usePlanReview, type PlanStep } from "agent-plan-review";
 import "agent-plan-review/styles.css";
 import "./demo.css";
-import { INITIAL_VALUES, PLAN } from "./plan";
+import { mockRevise } from "./mockAgent";
+import { pipeline } from "./scenarios/pipeline";
+import { trip } from "./scenarios/trip";
+import type { Scenario } from "./scenarios/types";
 
 type Msg = { id: number; from: "user" | "agent"; text: string; plan?: boolean };
 
+const SCENARIOS: Scenario[] = [trip, pipeline];
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let nextId = 1;
-
-/**
- * A stand-in for a real agent. Given a change request for a step, it returns
- * new values (and a note) — the same shape a tool call from an LLM would.
- */
-function mockRevise(step: PlanStep, request: string, values: PlanValues): { patch: PlanValues; note: string } {
-  const r = request.toLowerCase();
-  const num = r.match(/\d+(\.\d+)?/)?.[0];
-  const patch: PlanValues = {};
-  for (const f of step.fields ?? []) {
-    if (f.kind === "select") {
-      const hit = f.options.map((o) => (typeof o === "string" ? { value: o, label: o } : { value: o.value, label: o.label ?? o.value }))
-        .find((o) => r.includes(o.value.toLowerCase()) || r.includes(o.label.toLowerCase().replace(/ join$/, "")));
-      if (hit && hit.value !== values[f.key]) patch[f.key] = hit.value;
-    }
-    if (f.kind === "number" && num && !(Object.keys(patch).some((k) => step.fields?.find((x) => x.key === k)?.kind === "number"))) patch[f.key] = Number(num);
-    if (f.kind === "toggle" && /(skip|no|without|don't)/.test(r) && r.includes("slack")) patch[f.key] = false;
-    if (f.kind === "text") {
-      const name = request.match(/(?:call it|name it|called)\s+([\w.-]+)/i)?.[1];
-      if (name) patch[f.key] = name.toLowerCase();
-    }
-  }
-  const changed = Object.keys(patch);
-  return {
-    patch,
-    note: changed.length
-      ? `Updated “${step.label}”: ${changed.map((k) => `${step.fields?.find((f) => f.key === k)?.label} → ${stepSummary({ ...step, summary: `{{${k}}}` }, { ...values, ...patch })}`).join(", ")}.`
-      : `I couldn't map that to a setting on “${step.label}”, so I left it as is. Try naming a value, e.g. “${step.askHint}”.`,
-  };
-}
 
 function Dots() {
   return (
@@ -52,6 +26,7 @@ function Dots() {
 }
 
 function App() {
+  const [scenario, setScenario] = useState<Scenario>(trip);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [steps, setSteps] = useState<PlanStep[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -65,37 +40,46 @@ function App() {
 
   const review = usePlanReview({
     steps,
-    initialValues: INITIAL_VALUES,
+    initialValues: scenario.initialValues,
     streaming,
-    onComplete: () => {
+    onComplete: (values) => {
       setBuilt(true);
-      say("agent", "Building the pipeline with the plan you confirmed.");
+      say("agent", scenario.done(values));
     },
   });
 
   // The agent "streams" its plan one step at a time.
-  const start = async () => {
+  // Each run gets a token, so switching scenarios mid-stream stops the old one.
+  const run = useRef(0);
+  const start = async (sc: Scenario) => {
+    const token = ++run.current;
+    const live = () => run.current === token;
+    setScenario(sc);
     setMessages([]);
     setSteps([]);
     setBuilt(false);
-    review.reset(INITIAL_VALUES);
-    say("user", "Flag products that are about to run out of stock.");
+    setAskStep(null);
+    setDraft("");
+    review.reset(sc.initialValues);
+    say("user", sc.prompt);
     setThinking(true);
     await wait(900);
+    if (!live()) return;
     setThinking(false);
-    say("agent", "Here's my plan. Confirm each step or change anything that doesn't look right.", true);
+    say("agent", sc.intro, true);
     setStreaming(true);
-    for (const s of PLAN) {
+    for (const s of sc.steps) {
       await wait(380);
+      if (!live()) return;
       setSteps((p) => [...p, s]);
     }
     setStreaming(false);
   };
-  const started = useRef(false);
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    void start();
+    void start(trip);
+    return () => {
+      run.current++;
+    };
   }, []);
 
   useEffect(() => {
@@ -124,7 +108,9 @@ function App() {
     // While the agent works on it, the step shows a revising placeholder.
     setSteps((p) => p.map((s) => (s.id === target.id ? { ...s, pending: true } : s)));
     review.edit(target.id);
+    const token = run.current;
     await wait(1300);
+    if (run.current !== token) return;
     const { patch, note } = mockRevise(target, text, review.values);
     review.setValues(patch);
     setSteps((p) => p.map((s) => (s.id === target.id ? { ...s, pending: false } : s)));
@@ -146,7 +132,20 @@ function App() {
           to change it. Every choice flows back to the agent as structured context.
         </p>
         <div className="intro-actions">
-          <button className="ghost" onClick={() => void start()}>
+          <div className="tabs" role="tablist" aria-label="Example">
+            {SCENARIOS.map((sc) => (
+              <button
+                key={sc.id}
+                role="tab"
+                aria-selected={sc.id === scenario.id}
+                className={sc.id === scenario.id ? "tab tab-on" : "tab"}
+                onClick={() => void start(sc)}
+              >
+                {sc.name}
+              </button>
+            ))}
+          </div>
+          <button className="ghost" onClick={() => void start(scenario)}>
             Replay
           </button>
           <a href="https://github.com/estherchaep/agent-plan-review">GitHub</a>
@@ -163,7 +162,7 @@ function App() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.25 }}
             >
-              {m.text}
+              <InlineMarkdown text={m.text} />
               {/* The plan sits under the agent message that introduced it */}
               {m.plan && steps.length > 0 && (
                 <div className="plan">
@@ -186,7 +185,7 @@ function App() {
         </div>
 
         <div className="composer-wrap">
-          <PlanProgress review={review} onConfirmAll={() => review.confirmAll()} confirmAllLabel="Confirm all & build" />
+          <PlanProgress review={review} onConfirmAll={() => review.confirmAll()} confirmAllLabel={scenario.confirmAllLabel} />
           <AnimatePresence>
             {askStep && (
               <motion.div className="ask-chip" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>

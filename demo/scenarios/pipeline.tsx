@@ -1,4 +1,5 @@
 import type { PlanStep, PlanValues } from "agent-plan-review";
+import type { Scenario } from "./types";
 
 // An example plan, as an agent might return it. Everything except `validate`,
 // `transform` and `content` is plain JSON.
@@ -28,7 +29,7 @@ function SchemaChips({ topics }: { topics: string[] }) {
   );
 }
 
-export const INITIAL_VALUES: PlanValues = {
+const INITIAL_VALUES: PlanValues = {
   connection: "Kafka retail · dev",
   ordersTopic: "orders",
   stockTopic: "inventory",
@@ -43,7 +44,7 @@ export const INITIAL_VALUES: PlanValues = {
   sample: "Last 24 hours",
 };
 
-export const PLAN: PlanStep[] = [
+const PLAN: PlanStep[] = [
   {
     id: "sources",
     label: "Connect to sources",
@@ -130,3 +131,14 @@ export const PLAN: PlanStep[] = [
     confirmLabel: "Confirm & build",
   },
 ];
+
+export const pipeline: Scenario = {
+  id: "pipeline",
+  name: "Data pipeline",
+  prompt: "Flag products that are about to run out of stock.",
+  intro: "Here's my plan for the pipeline. Confirm each step or change anything that doesn't look right.",
+  steps: PLAN,
+  initialValues: INITIAL_VALUES,
+  confirmAllLabel: "Confirm all & build",
+  done: (v) => `Building the pipeline — flagged SKUs will go to \`${v.outTopic}\`.`,
+};

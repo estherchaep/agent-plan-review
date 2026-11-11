@@ -12,19 +12,37 @@ When an agent proposes a plan, it shouldn't be a wall of text the user can only 
 Every choice is kept as structured values, so you can hand the agent exact context (`review.context()` as JSON, or `review.describe()` for a prompt) and it can act on what the user actually confirmed.
 
 ```
- ✓  CONNECT TO SOURCES                                  Edit
- │  orders + inventory · Kafka retail · dev
- ●  JOIN ON PRODUCT
+ "Plan a long weekend in Lisbon for two."
+
+ ✓  DATES & BUDGET                                      Edit
+ │  Thu, Mar 12 · 3 nights · 2 people · €1,800
+ ●  FLIGHTS
  │  ┌──────────────────────────────────────────────┐
- │  │ Match each order to the stock level for the  │
- │  │ same SKU.                                    │
- │  │ Join type      [Inner join            ▾]     │
- │  │ Match window   [60] seconds                  │
+ │  │ Find a return flight to Lisbon that fits     │
+ │  │ your schedule.                               │
+ │  │ Why  Thursday mornings are about €80 cheaper │
+ │  │ LHR ┄┄┄┄┄┄┄┄ ✈ ┄┄┄┄┄┄┄┄ LIS   €296 return    │
+ │  │ Cabin          [Economy              ▾]      │
+ │  │ Outbound time  [Morning              ▾]      │
  │  │ (Confirm & continue)   Ask to change         │
  │  └──────────────────────────────────────────────┘
- 3  FLAG LOW STOCK
-    Compute days of cover and flag SKUs about to run out.
+ 3  WHERE TO STAY
+ │  Pick a neighborhood and a nightly price.
+ 4  DAY-BY-DAY PLAN
+ 5  HOLD & BOOK
 ```
+
+## Where it's useful
+
+Any time an agent's plan has several decisions that depend on each other, where a wrong guess costs time or money, and where the user knows something the agent doesn't:
+
+- **Travel:** dates, flights, hotel, itinerary, then hold and book
+- **Errands & admin:** meal plan → grocery order, inbox cleanup, moving checklist, expense reports
+- **Communication:** scheduling a meeting, drafting a letter (tone, length, key points), event invites
+- **Work:** campaign launches, hiring loops, onboarding, refunds that need a human sign-off
+- **Technical:** data pipelines, deployments, migrations
+
+Anything irreversible, like sending, paying, deleting or deploying, gets its own confirmation step instead of being hidden inside "Accept plan".
 
 ## Install
 
@@ -46,30 +64,41 @@ import "agent-plan-review/styles.css";
 
 const steps: PlanStep[] = [
   {
-    id: "sources",
-    label: "Connect to sources",
-    intent: "Read orders and stock levels, and profile both schemas.",
-    rationale: "These are the only topics with a `sku` column.",
+    id: "dates",
+    label: "Dates & budget",
+    intent: "Lock in when you're going, who's coming, and the total you want to spend.",
+    rationale: "Mid-March is shoulder season — hotels are about 30% cheaper than April.",
     fields: [
-      { kind: "select", key: "ordersTopic", label: "Orders topic", options: ["orders", "web_orders"] },
-      { kind: "select", key: "stockTopic", label: "Stock topic", options: ["inventory", "warehouse_stock"] },
+      { kind: "select", key: "depart", label: "Leave on", options: ["Thu, Mar 12", "Fri, Mar 13"] },
+      { kind: "number", key: "nights", label: "Nights", unit: "nights", min: 1, max: 7 },
+      { kind: "number", key: "budget", label: "Total budget", unit: "euros", min: 200, required: true },
     ],
-    summary: "{{ordersTopic}} + {{stockTopic}}",
+    summary: "{{depart}} · {{nights}} · {{budget}}",
+    validate: (v) => (Number(v.budget) / Number(v.nights) < 150 ? "That budget is **too tight** for Lisbon. Raise it or cut a night." : null),
   },
   {
-    id: "logic",
-    label: "Flag low stock",
-    intent: "Flag SKUs whose days of cover drop below a threshold.",
-    fields: [{ kind: "number", key: "threshold", label: "Days of cover below", unit: "days", min: 0.5, max: 60 }],
-    summary: "cover < {{threshold}}",
+    id: "stay",
+    label: "Where to stay",
+    intent: "Pick a neighborhood and shortlist hotels that match.",
+    fields: [
+      { kind: "select", key: "area", label: "Neighborhood", options: ["Alfama", "Baixa", "Príncipe Real"] },
+      { kind: "toggle", key: "freeCancel", label: "Free cancellation only" },
+    ],
+    summary: "{{area}} · free cancellation: {{freeCancel}}",
+  },
+  {
+    id: "book",
+    label: "Hold & book",
+    intent: "Hold the flight and hotel, then send you one summary to approve.",
+    confirmLabel: "Confirm & hold",
   },
 ];
 
-function AgentPlan({ onRun, onAskAgent }) {
+function TripPlan({ onBook, onAskAgent }) {
   const review = usePlanReview({
     steps,
-    initialValues: { threshold: 3 },
-    onComplete: (values) => onRun(values),
+    initialValues: { nights: 3, budget: 1800, freeCancel: true },
+    onComplete: (values) => onBook(values),
   });
 
   return (
@@ -89,6 +118,23 @@ Apart from `validate`, `transform`, `render` and `content`, a `PlanStep` is plai
 const steps = agentResult.steps.map((s) => ({ ...s, validate: validators[s.id] }));
 ```
 
+For example, the model can return this as the input to a `propose_plan` tool:
+
+```json
+{
+  "id": "flights",
+  "label": "Flights",
+  "intent": "Find a return flight to Lisbon that fits your schedule.",
+  "rationale": "Thursday morning flights are about **€80 cheaper** than Friday evening ones.",
+  "fields": [
+    { "kind": "select", "key": "cabin", "label": "Cabin", "options": ["Economy", "Premium economy", "Business"] },
+    { "kind": "select", "key": "stops", "label": "Stops", "options": ["Nonstop only", "Up to 1 stop"] }
+  ],
+  "summary": "{{cabin}} · {{stops}}",
+  "askHint": "Fly from Gatwick, evening departure"
+}
+```
+
 Built-in checks for `required`, number `min`/`max` and text `pattern` run without any code.
 
 ### Sending context back to the agent
@@ -96,12 +142,13 @@ Built-in checks for `required`, number `min`/`max` and text `pattern` run withou
 ```ts
 // After each confirmation, or when the user asks for a change:
 review.context();
-// { steps: [{ id: "sources", label: "...", status: "done", summary: "orders + inventory", values: { ... } }, ...],
-//   values: { ordersTopic: "orders", ... } }
+// { steps: [{ id: "dates", label: "Dates & budget", status: "done", summary: "Thu, Mar 12 · 3 nights · 1800 euros", values: { ... } }, ...],
+//   values: { depart: "Thu, Mar 12", nights: 3, budget: 1800, ... } }
 
 review.describe();
-// 1. Connect to sources [confirmed] — orders + inventory
-// 2. Flag low stock [in review] — cover < 3 days
+// 1. Dates & budget [confirmed] — Thu, Mar 12 · 3 nights · 1800 euros
+// 2. Where to stay [in review] — Alfama · free cancellation: on
+// 3. Hold & book [not reviewed] — Hold the flight and hotel, then send you one summary to approve.
 ```
 
 ### Ask to change → agent revises
@@ -193,7 +240,14 @@ pnpm install
 pnpm dev
 ```
 
-The demo runs a mock agent. It streams a plan in, lets you confirm or change each step, revises a step when you ask, and shows the context it would send back to the agent.
+The demo has two examples you can switch between:
+
+- **Trip planning** (default): a long weekend in Lisbon. It covers dates and budget, flights with a live price card, where to stay (with a check that the hotel leaves enough budget for food and activities), a day-by-day itinerary, and a hold-and-book step that charges nothing until you approve.
+- **Data pipeline**: an agent building a stock-out alert pipeline, with source schemas, join keys and output settings.
+
+A mock agent streams each plan in step by step. Try **Ask to change** with requests like "Make it 4 nights and €2,400", "Fly from Gatwick, evening departure" or "More relaxed, and skip Sintra". The step shows a revising placeholder, then the agent fills in the new values. The panel on the right shows the context that would go back to the agent.
+
+The example plans live in [`demo/scenarios/`](demo/scenarios), and the mock agent is in [`demo/mockAgent.ts`](demo/mockAgent.ts).
 
 ## License
 
