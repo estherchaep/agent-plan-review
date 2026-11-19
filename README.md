@@ -2,6 +2,8 @@
 
 A React component for reviewing an AI agent's plan **one step at a time**.
 
+**[Try the live demo →](https://estherchaep.github.io/agent-plan-review/)**
+
 When an agent proposes a plan, it shouldn't be a wall of text the user can only accept or reject. With `agent-plan-review`, each step becomes a small card the user can:
 
 - **Confirm**. The step collapses to a one-line summary, the rail fills in, and the next step opens.
@@ -234,6 +236,8 @@ Override any `--apr-*` CSS variable on `.apr-root` / `.apr-progress`. For exampl
 Dark mode follows `prefers-color-scheme` unless you pass `theme`. Animations respect `prefers-reduced-motion`.
 
 ## Demo
+
+The demo is hosted at **https://estherchaep.github.io/agent-plan-review/**. `pnpm run deploy:demo` rebuilds it and publishes it to the `gh-pages` branch. To run it locally:
 
 ```bash
 pnpm install

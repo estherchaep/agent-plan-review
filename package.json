@@ -9,7 +9,7 @@
     "type": "git",
     "url": "git+https://github.com/estherchaep/agent-plan-review.git"
   },
-  "homepage": "https://github.com/estherchaep/agent-plan-review#readme",
+  "homepage": "https://estherchaep.github.io/agent-plan-review/",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -27,6 +27,7 @@
     "dev": "vite",
     "build": "rm -rf dist && tsc -p tsconfig.build.json && cp src/styles.css dist/styles.css",
     "build:demo": "vite build",
+    "deploy:demo": "vite build && touch demo-dist/.nojekyll && cd demo-dist && rm -rf .git && git init -q -b gh-pages && git add -A && git commit -qm \"Deploy demo\" && git push -fq https://github.com/estherchaep/agent-plan-review.git gh-pages && rm -rf .git",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
